@@ -28,16 +28,17 @@ function collageVariant(key: string) {
   let h = 0;
   for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) >>> 0;
   const widthRatios = [0.6, 0.5, 0.68, 0.54, 0.64, 0.52];
-  // 가로 위치 0(왼쪽)~1(오른쪽) — 좌우로 제각각 흩어지게
-  const xFracs = [0.02, 0.62, 0.28, 0.96, 0.14, 0.78, 0.44, 0.86];
   const rotations = ['-9deg', '7deg', '-5deg', '11deg', '-7deg', '4deg', '-12deg', '8deg'];
   return {
     widthRatio: widthRatios[h % widthRatios.length],
-    xFrac: xFracs[(h >> 3) % xFracs.length],
+    jitter: (((h >> 9) % 11) - 5) / 100, // -0.05 ~ 0.05 가로 미세 흔들림
     rotate: rotations[(h >> 5) % rotations.length],
     dropDelay: (h >> 11) % 5,
   };
 }
+
+// 순서별 가로 레인 — 가운데/왼쪽/오른쪽 골고루 분배 (한쪽 몰림 방지)
+const X_LANES = [0.5, 0.12, 0.86, 0.32, 0.68, 0.04, 0.95, 0.45, 0.22, 0.75];
 
 // 위에서 떨어지는 한 개의 두들 (세로로 자기 줄 — 겹치지 않음, 가로 위치만 랜덤)
 function FallingDoodle({
@@ -76,7 +77,9 @@ function FallingDoodle({
     ]).start();
   }, [drop, opacity, index, v.dropDelay]);
 
-  const left = v.xFrac * Math.max(0, FRAME_W - width);
+  const freeX = Math.max(0, FRAME_W - width);
+  const xFrac = Math.min(1, Math.max(0, X_LANES[index % X_LANES.length] + v.jitter));
+  const left = xFrac * freeX;
   const translateY = drop.interpolate({ inputRange: [0, 1], outputRange: [0, -300] });
 
   return (
