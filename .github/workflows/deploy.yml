@@ -26,6 +26,8 @@ jobs:
         run: npm install --no-audit --no-fund
       - name: Export web build
         run: npx expo export --platform web
+        env:
+          EXPO_PUBLIC_BASE_PATH: /diary
       - name: SPA fallback (404 -> index)
         run: cp dist/index.html dist/404.html
       - name: Setup Pages

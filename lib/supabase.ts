@@ -11,10 +11,11 @@ const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '';
 export const isSupabaseConfigured = !!supabaseUrl && !!supabaseAnonKey;
 
 // 비밀번호 재설정 메일이 돌아올 주소 (배포된 웹).
-// 웹에서 실행 중이면 현재 origin 기준, 아니면 배포 주소로 고정.
+// 웹에서 실행 중이면 현재 origin + base 경로 기준(호스팅에 무관), 아니면 배포 주소로 고정.
+const BASE_PATH = process.env.EXPO_PUBLIC_BASE_PATH || '';
 export const SITE_URL =
   Platform.OS === 'web' && typeof window !== 'undefined'
-    ? `${window.location.origin}/diary/`
+    ? `${window.location.origin}${BASE_PATH}/`
     : 'https://ccchiyoung.github.io/diary/';
 
 export const supabase = createClient(

@@ -26,9 +26,6 @@
     "plugins": [
       "expo-router"
     ],
-    "newArchEnabled": true,
-    "experiments": {
-      "baseUrl": "/diary"
-    }
+    "newArchEnabled": true
   }
 }
