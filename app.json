@@ -3,6 +3,7 @@
     "name": "diary",
     "slug": "diary",
     "version": "1.0.0",
+    "scheme": "diary",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -19,7 +20,15 @@
       "predictiveBackGestureEnabled": false
     },
     "web": {
-      "favicon": "./assets/favicon.png"
+      "favicon": "./assets/favicon.png",
+      "output": "single"
+    },
+    "plugins": [
+      "expo-router"
+    ],
+    "newArchEnabled": true,
+    "experiments": {
+      "baseUrl": "/diary"
     }
   }
 }
