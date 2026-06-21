@@ -1,10 +1,53 @@
 import { useEffect, useState } from 'react';
 import { Platform, View, Text, ActivityIndicator } from 'react-native';
-import { Stack } from 'expo-router';
+import { Stack, useRouter, useSegments } from 'expo-router';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { COLORS } from '../lib/theme';
+import { AuthProvider, useAuth } from '../lib/auth';
+
+function Loading() {
+  return (
+    <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: COLORS.bg }}>
+      <ActivityIndicator color={COLORS.accent} />
+    </View>
+  );
+}
+
+// 세션 유무에 따라 로그인/앱 화면으로 라우팅 가드
+function RootNavigator() {
+  const { session, loading } = useAuth();
+  const segments = useSegments();
+  const router = useRouter();
+
+  useEffect(() => {
+    if (loading) return;
+    const onLogin = segments[0] === 'login';
+    if (!session && !onLogin) router.replace('/login');
+    else if (session && onLogin) router.replace('/');
+  }, [session, loading, segments]);
+
+  if (loading) return <Loading />;
+
+  return (
+    <Stack
+      screenOptions={{
+        headerStyle: { backgroundColor: COLORS.bg },
+        headerShadowVisible: false,
+        headerTintColor: COLORS.text,
+        headerTitleStyle: { fontWeight: '700' },
+        contentStyle: { backgroundColor: COLORS.bg },
+      }}
+    >
+      <Stack.Screen name="login" options={{ headerShown: false }} />
+      <Stack.Screen name="index" options={{ title: '감정 다이어리' }} />
+      <Stack.Screen name="draw" options={{ title: '오늘의 두들' }} />
+      <Stack.Screen name="write" options={{ title: '한 줄 기록' }} />
+      <Stack.Screen name="monthly" options={{ title: '먼슬리' }} />
+    </Stack>
+  );
+}
 
 const CK_VERSION = '0.40.0';
 const CK_BASE = `https://cdn.jsdelivr.net/npm/canvaskit-wasm@${CK_VERSION}/bin/full/`;
@@ -65,20 +108,9 @@ export default function RootLayout() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
         <StatusBar style="dark" />
-        <Stack
-          screenOptions={{
-            headerStyle: { backgroundColor: COLORS.bg },
-            headerShadowVisible: false,
-            headerTintColor: COLORS.text,
-            headerTitleStyle: { fontWeight: '700' },
-            contentStyle: { backgroundColor: COLORS.bg },
-          }}
-        >
-          <Stack.Screen name="index" options={{ title: '감정 다이어리' }} />
-          <Stack.Screen name="draw" options={{ title: '오늘의 두들' }} />
-          <Stack.Screen name="write" options={{ title: '한 줄 기록' }} />
-          <Stack.Screen name="monthly" options={{ title: '먼슬리' }} />
-        </Stack>
+        <AuthProvider>
+          <RootNavigator />
+        </AuthProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );

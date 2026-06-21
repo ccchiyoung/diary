@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useAuth } from '../lib/auth';
 import { getEntryMap, type Entry } from '../lib/storage';
 import { todayKey, dayLabel, weekDays, weekRangeLabel } from '../lib/dates';
 import { COLORS } from '../lib/theme';
@@ -40,6 +41,7 @@ function collageVariant(date: string) {
 export default function HomeScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { signOut } = useAuth();
   const [entries, setEntries] = useState<Record<string, Entry>>({});
 
   // 화면 포커스마다 이번 주 기록 갱신
@@ -63,7 +65,12 @@ export default function HomeScreen() {
   return (
     <View style={{ flex: 1 }}>
       <View style={styles.header}>
-        <Text style={styles.date}>{dayLabel(todayKey())}</Text>
+        <View style={styles.headerRow}>
+          <Text style={styles.date}>{dayLabel(todayKey())}</Text>
+          <Pressable onPress={signOut} hitSlop={8}>
+            <Text style={styles.logout}>로그아웃</Text>
+          </Pressable>
+        </View>
         <Pressable style={styles.primaryBtn} onPress={() => router.push('/draw')}>
           <Text style={styles.primaryText}>오늘 감정 기록하기</Text>
         </Pressable>
@@ -138,7 +145,14 @@ export default function HomeScreen() {
 
 const styles = StyleSheet.create({
   header: { paddingHorizontal: 16, paddingTop: 8 },
-  date: { fontSize: 16, fontWeight: '700', color: COLORS.text, marginBottom: 16 },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  },
+  date: { fontSize: 16, fontWeight: '700', color: COLORS.text },
+  logout: { fontSize: 13, color: COLORS.subtext, fontWeight: '600' },
   primaryBtn: {
     backgroundColor: COLORS.accent,
     paddingVertical: 16,
