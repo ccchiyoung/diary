@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   StyleSheet,
   View,
@@ -7,8 +7,14 @@ import {
   Image,
   ScrollView,
   Dimensions,
-  Animated,
 } from 'react-native';
+import Reanimated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withDelay,
+  withSpring,
+  withTiming,
+} from 'react-native-reanimated';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../lib/auth';
@@ -44,52 +50,36 @@ const X_LANES = [0.5, 0.12, 0.86, 0.32, 0.68, 0.04, 0.95, 0.45, 0.22, 0.75];
 function FallingDoodle({
   entry,
   index,
-  total,
   width,
   height,
 }: {
   entry: Entry;
   index: number;
-  total: number;
   width: number;
   height: number;
 }) {
   const v = collageVariant(entry.id);
-  const drop = useRef(new Animated.Value(1)).current; // 1=위, 0=착지
-  const opacity = useRef(new Animated.Value(0)).current;
+  const drop = useSharedValue(-300); // 위에서 시작
+  const op = useSharedValue(0);
 
   useEffect(() => {
     const delay = index * 100 + v.dropDelay * 60;
-    Animated.parallel([
-      Animated.spring(drop, {
-        toValue: 0,
-        delay,
-        friction: 6,
-        tension: 70,
-        useNativeDriver: true,
-      }),
-      Animated.timing(opacity, {
-        toValue: 1,
-        duration: 160,
-        delay,
-        useNativeDriver: true,
-      }),
-    ]).start();
-  }, [drop, opacity, index, v.dropDelay]);
+    drop.value = withDelay(delay, withSpring(0, { damping: 9, stiffness: 90 }));
+    op.value = withDelay(delay, withTiming(1, { duration: 160 }));
+  }, [drop, op, index, v.dropDelay]);
+
+  const aStyle = useAnimatedStyle(() => ({
+    opacity: op.value,
+    transform: [{ translateY: drop.value }],
+  }));
 
   const freeX = Math.max(0, FRAME_W - width);
   const xFrac = Math.min(1, Math.max(0, X_LANES[index % X_LANES.length] + v.jitter));
   const left = xFrac * freeX;
-  const translateY = drop.interpolate({ inputRange: [0, 1], outputRange: [0, -300] });
 
   return (
-    <Animated.View
-      style={{
-        width: '100%',
-        marginTop: index === 0 ? 0 : 16, // 줄 간격(겹침 없음)
-        opacity,
-        transform: [{ translateY }],
-      }}
+    <Reanimated.View
+      style={[{ width: '100%', marginTop: index === 0 ? 0 : 16 }, aStyle]}
     >
       <View style={{ marginLeft: left, width, alignItems: 'center' }}>
         {!!entry.text && (
@@ -104,7 +94,7 @@ function FallingDoodle({
           <Image source={{ uri: entry.doodleUri }} style={{ width, height }} resizeMode="contain" />
         </View>
       </View>
-    </Animated.View>
+    </Reanimated.View>
   );
 }
 
@@ -175,14 +165,7 @@ export default function HomeScreen() {
                 w = h / ratio;
               }
               return (
-                <FallingDoodle
-                  key={entry.id}
-                  entry={entry}
-                  index={i}
-                  total={stacked.length}
-                  width={w}
-                  height={h}
-                />
+                <FallingDoodle key={entry.id} entry={entry} index={i} width={w} height={h} />
               );
             })}
           </ScrollView>
