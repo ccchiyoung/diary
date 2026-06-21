@@ -84,8 +84,9 @@ export async function saveEntry(input: {
       date: input.date,
       text: input.text,
       color: input.color,
-      width: input.width,
-      height: input.height,
+      // width/height 컬럼은 integer → 소수(DPR 보정값)를 반올림
+      width: Math.round(input.width),
+      height: Math.round(input.height),
       doodle_path: path,
       updated_at: new Date().toISOString(),
     },
