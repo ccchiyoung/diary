@@ -9,6 +9,8 @@ export type Entry = {
   color: string;
   width: number;
   height: number;
+  posX: number | null; // 위클리에서 사용자가 옮긴 위치 (영역 대비 0~1)
+  posY: number | null;
   updatedAt: number;
 };
 
@@ -23,9 +25,13 @@ type Row = {
   color: string | null;
   width: number | null;
   height: number | null;
+  pos_x: number | null;
+  pos_y: number | null;
   doodle_path: string;
   updated_at: string;
 };
+
+const SELECT_COLS = 'id, date, text, color, width, height, pos_x, pos_y, doodle_path, updated_at';
 
 async function requireUserId(): Promise<string> {
   const { data } = await supabase.auth.getSession();
@@ -61,6 +67,8 @@ function rowToEntry(row: Row, signedUrl: string): Entry {
     color: row.color ?? '#343A40',
     width: row.width ?? 0,
     height: row.height ?? 0,
+    posX: row.pos_x,
+    posY: row.pos_y,
     updatedAt: row.updated_at ? Date.parse(row.updated_at) : 0,
   };
 }
@@ -116,7 +124,7 @@ export async function saveEntry(input: {
       doodle_path: path,
       updated_at: new Date().toISOString(),
     })
-    .select('id, date, text, color, width, height, doodle_path, updated_at')
+    .select(SELECT_COLS)
     .single();
   if (error) throw error;
 
@@ -131,7 +139,7 @@ export async function listEntries(dates: string[]): Promise<Entry[]> {
   if (!uid) return [];
   const { data, error } = await supabase
     .from('entries')
-    .select('id, date, text, color, width, height, doodle_path, updated_at')
+    .select(SELECT_COLS)
     .eq('user_id', uid)
     .in('date', dates)
     .order('date', { ascending: false })
@@ -153,6 +161,21 @@ export async function listEntriesByDate(
     (map[e.date] ??= []).push(e);
   }
   return map;
+}
+
+// 두들 위치 저장 (영역 대비 0~1 비율)
+export async function updateEntryPosition(
+  id: string,
+  posX: number,
+  posY: number
+): Promise<void> {
+  const uid = await getUserId();
+  if (!uid) return;
+  await supabase
+    .from('entries')
+    .update({ pos_x: posX, pos_y: posY })
+    .eq('id', id)
+    .eq('user_id', uid);
 }
 
 // 기록 삭제 (이미지 + 행)

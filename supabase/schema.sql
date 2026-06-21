@@ -11,6 +11,8 @@ create table if not exists public.entries (
   width integer default 0,
   height integer default 0,
   doodle_path text not null,
+  pos_x double precision, -- 위클리에서 옮긴 위치 (영역 대비 0~1)
+  pos_y double precision,
   updated_at timestamptz not null default now()
   -- 하루 여러 개 허용 (앱에서 최대 3개로 제한)
 );
