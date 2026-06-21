@@ -16,6 +16,10 @@ import {
   Path,
   Skia,
   useCanvasRef,
+  PaintStyle,
+  StrokeCap,
+  StrokeJoin,
+  ImageFormat,
   type SkPath,
 } from '@shopify/react-native-skia';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
@@ -108,14 +112,30 @@ const DoodleCanvas = forwardRef<DoodleCanvasHandle>((_props, ref) => {
       t = Math.max(0, t);
       r = Math.min(size.width || r, r);
       b = Math.min(size.height || b, b);
-      const cw = Math.max(1, r - l);
-      const ch = Math.max(1, b - t);
+      const cw = Math.max(1, Math.ceil(r - l));
+      const ch = Math.max(1, Math.ceil(b - t));
 
-      const rect = Skia.XYWHRect(l, t, cw, ch);
-      const image = canvasRef.current?.makeImageSnapshot(rect);
+      // 부분 캡처(makeImageSnapshot(rect)) 대신, 그림 크기만큼의 오프스크린 캔버스에
+      // 선을 다시 그려서 추출 — 웹/네이티브 모두 좌표·DPR 영향 없이 정확히 잘림.
+      const surface = Skia.Surface.MakeOffscreen(cw, ch);
+      if (!surface) return null;
+      const canvas = surface.getCanvas();
+      canvas.translate(-l, -t);
+      for (const s of all) {
+        const paint = Skia.Paint();
+        paint.setStyle(PaintStyle.Stroke);
+        paint.setStrokeWidth(s.width);
+        paint.setStrokeCap(StrokeCap.Round);
+        paint.setStrokeJoin(StrokeJoin.Round);
+        paint.setAntiAlias(true);
+        paint.setColor(Skia.Color(s.color));
+        canvas.drawPath(s.path, paint);
+      }
+      surface.flush();
+      const image = surface.makeImageSnapshot();
       if (!image) return null;
       lastSizeRef.current = { width: cw, height: ch };
-      return image.encodeToBase64();
+      return image.encodeToBase64(ImageFormat.PNG, 100);
     },
     getColor: () => color,
     getSize: () =>

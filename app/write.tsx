@@ -51,8 +51,10 @@ export default function WriteScreen() {
         height: draft.height,
       });
       clearDraft();
-      // 기록 후 홈으로 (스택 초기화)
-      router.dismissAll();
+      // 기록 후 홈으로 (스택 초기화). 웹에서는 dismissAll 이 동작하지 않을 수 있어 가드.
+      try {
+        router.dismissAll();
+      } catch {}
       router.replace('/');
     } catch (e) {
       setSaving(false);
