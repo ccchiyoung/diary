@@ -48,7 +48,9 @@ export default function HomeScreen() {
   useFocusEffect(
     useCallback(() => {
       let active = true;
-      getEntryMap(weekDays(new Date())).then((m) => active && setEntries(m));
+      getEntryMap(weekDays(new Date()))
+        .then((m) => active && setEntries(m))
+        .catch(() => {});
       return () => {
         active = false;
       };

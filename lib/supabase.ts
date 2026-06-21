@@ -10,6 +10,13 @@ const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '';
 // 키가 설정됐는지 여부 (미설정 시 로그인 화면에서 안내)
 export const isSupabaseConfigured = !!supabaseUrl && !!supabaseAnonKey;
 
+// 비밀번호 재설정 메일이 돌아올 주소 (배포된 웹).
+// 웹에서 실행 중이면 현재 origin 기준, 아니면 배포 주소로 고정.
+export const SITE_URL =
+  Platform.OS === 'web' && typeof window !== 'undefined'
+    ? `${window.location.origin}/diary/`
+    : 'https://ccchiyoung.github.io/diary/';
+
 export const supabase = createClient(
   supabaseUrl || 'https://placeholder.supabase.co',
   supabaseAnonKey || 'placeholder-anon-key',

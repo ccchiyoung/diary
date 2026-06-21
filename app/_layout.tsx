@@ -17,16 +17,22 @@ function Loading() {
 
 // 세션 유무에 따라 로그인/앱 화면으로 라우팅 가드
 function RootNavigator() {
-  const { session, loading } = useAuth();
+  const { session, loading, passwordRecovery } = useAuth();
   const segments = useSegments();
   const router = useRouter();
 
   useEffect(() => {
     if (loading) return;
     const onLogin = segments[0] === 'login';
+    const onReset = segments[0] === 'reset-password';
+    // 비밀번호 재설정 링크로 들어온 경우: 새 비번 화면으로
+    if (passwordRecovery) {
+      if (!onReset) router.replace('/reset-password');
+      return;
+    }
     if (!session && !onLogin) router.replace('/login');
     else if (session && onLogin) router.replace('/');
-  }, [session, loading, segments]);
+  }, [session, loading, passwordRecovery, segments]);
 
   if (loading) return <Loading />;
 
@@ -41,6 +47,7 @@ function RootNavigator() {
       }}
     >
       <Stack.Screen name="login" options={{ headerShown: false }} />
+      <Stack.Screen name="reset-password" options={{ headerShown: false }} />
       <Stack.Screen name="index" options={{ title: '감정 다이어리' }} />
       <Stack.Screen name="draw" options={{ title: '오늘의 두들' }} />
       <Stack.Screen name="write" options={{ title: '한 줄 기록' }} />

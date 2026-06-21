@@ -24,7 +24,7 @@ export default function MonthlyScreen() {
   const [selected, setSelected] = useState<Entry | null>(null);
 
   const loadFor = useCallback((ref: Date) => {
-    getEntryMap(monthDays(ref)).then(setEntries);
+    getEntryMap(monthDays(ref)).then(setEntries).catch(() => {});
   }, []);
 
   useFocusEffect(

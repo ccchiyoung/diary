@@ -24,11 +24,10 @@ type Row = {
   updated_at: string;
 };
 
-async function requireUserId(): Promise<string> {
+// 현재 로그인 사용자 id (없으면 null)
+async function getUserId(): Promise<string | null> {
   const { data } = await supabase.auth.getSession();
-  const uid = data.session?.user.id;
-  if (!uid) throw new Error('로그인이 필요합니다.');
-  return uid;
+  return data.session?.user.id ?? null;
 }
 
 // 여러 path 를 한 번에 서명 URL 로 변환 (path -> url)
@@ -66,7 +65,8 @@ export async function saveEntry(input: {
   width: number;
   height: number;
 }): Promise<Entry> {
-  const uid = await requireUserId();
+  const uid = await getUserId();
+  if (!uid) throw new Error('로그인이 필요합니다.');
   const path = `${uid}/${input.date}.png`;
 
   // 1) 이미지 업로드 (덮어쓰기)
@@ -116,7 +116,8 @@ export async function getEntries(dates: string[]): Promise<(Entry | null)[]> {
 // 날짜 키 -> Entry 맵 (기록 있는 것만)
 export async function getEntryMap(dates: string[]): Promise<Record<string, Entry>> {
   if (dates.length === 0) return {};
-  const uid = await requireUserId();
+  const uid = await getUserId();
+  if (!uid) return {}; // 로그인 전이면 빈 결과 (에러 대신)
   const { data, error } = await supabase
     .from('entries')
     .select('date, text, color, width, height, doodle_path, updated_at')
