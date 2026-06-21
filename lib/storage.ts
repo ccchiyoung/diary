@@ -2,6 +2,7 @@ import { decode as decodeBase64 } from 'base64-arraybuffer';
 import { supabase } from './supabase';
 
 export type Entry = {
+  id: string;
   date: string; // YYYY-MM-DD
   doodleUri: string; // 서명된 이미지 URL (표시용)
   text: string;
@@ -13,8 +14,10 @@ export type Entry = {
 
 const BUCKET = 'doodles';
 const SIGNED_TTL = 60 * 60; // 1시간
+export const MAX_PER_DAY = 3;
 
 type Row = {
+  id: string;
   date: string;
   text: string | null;
   color: string | null;
@@ -24,13 +27,18 @@ type Row = {
   updated_at: string;
 };
 
-// 현재 로그인 사용자 id (없으면 null)
+async function requireUserId(): Promise<string> {
+  const { data } = await supabase.auth.getSession();
+  const uid = data.session?.user.id;
+  if (!uid) throw new Error('로그인이 필요합니다.');
+  return uid;
+}
+
 async function getUserId(): Promise<string | null> {
   const { data } = await supabase.auth.getSession();
   return data.session?.user.id ?? null;
 }
 
-// 여러 path 를 한 번에 서명 URL 로 변환 (path -> url)
 async function signMany(paths: string[]): Promise<Record<string, string>> {
   const map: Record<string, string> = {};
   if (paths.length === 0) return map;
@@ -46,6 +54,7 @@ async function signMany(paths: string[]): Promise<Record<string, string>> {
 
 function rowToEntry(row: Row, signedUrl: string): Entry {
   return {
+    id: row.id,
     date: row.date,
     doodleUri: signedUrl,
     text: row.text ?? '',
@@ -56,7 +65,19 @@ function rowToEntry(row: Row, signedUrl: string): Entry {
   };
 }
 
-// 두들 base64 + 메타를 Supabase 에 저장 (하루 1개, 같은 날이면 덮어쓰기)
+// 특정 날짜의 기록 개수
+export async function countEntriesForDate(date: string): Promise<number> {
+  const uid = await getUserId();
+  if (!uid) return 0;
+  const { count } = await supabase
+    .from('entries')
+    .select('id', { count: 'exact', head: true })
+    .eq('user_id', uid)
+    .eq('date', date);
+  return count ?? 0;
+}
+
+// 두들 + 메타를 새 기록으로 추가 (하루 최대 MAX_PER_DAY 개)
 export async function saveEntry(input: {
   date: string;
   base64: string;
@@ -65,77 +86,78 @@ export async function saveEntry(input: {
   width: number;
   height: number;
 }): Promise<Entry> {
-  const uid = await getUserId();
-  if (!uid) throw new Error('로그인이 필요합니다.');
-  const path = `${uid}/${input.date}.png`;
+  const uid = await requireUserId();
 
-  // 1) 이미지 업로드 (덮어쓰기)
+  const existing = await countEntriesForDate(input.date);
+  if (existing >= MAX_PER_DAY) {
+    throw new Error(`하루 최대 ${MAX_PER_DAY}개까지 기록할 수 있어요.`);
+  }
+
+  // 하루 여러 개를 위해 유니크한 파일 경로
+  const unique = `${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
+  const path = `${uid}/${input.date}/${unique}.png`;
+
   const bytes = decodeBase64(input.base64);
   const up = await supabase.storage.from(BUCKET).upload(path, bytes, {
     contentType: 'image/png',
-    upsert: true,
+    upsert: false,
   });
   if (up.error) throw up.error;
 
-  // 2) 메타 upsert (user_id + date 유니크)
-  const { error } = await supabase.from('entries').upsert(
-    {
+  const { data, error } = await supabase
+    .from('entries')
+    .insert({
       user_id: uid,
       date: input.date,
       text: input.text,
       color: input.color,
-      // width/height 컬럼은 integer → 소수(DPR 보정값)를 반올림
       width: Math.round(input.width),
       height: Math.round(input.height),
       doodle_path: path,
       updated_at: new Date().toISOString(),
-    },
-    { onConflict: 'user_id,date' }
-  );
+    })
+    .select('id, date, text, color, width, height, doodle_path, updated_at')
+    .single();
   if (error) throw error;
 
   const signed = await signMany([path]);
-  return rowToEntry(
-    {
-      date: input.date,
-      text: input.text,
-      color: input.color,
-      width: input.width,
-      height: input.height,
-      doodle_path: path,
-      updated_at: new Date().toISOString(),
-    },
-    signed[path] ?? ''
-  );
+  return rowToEntry(data as Row, signed[path] ?? '');
 }
 
-export async function getEntries(dates: string[]): Promise<(Entry | null)[]> {
-  const map = await getEntryMap(dates);
-  return dates.map((d) => map[d] ?? null);
-}
-
-// 날짜 키 -> Entry 맵 (기록 있는 것만)
-export async function getEntryMap(dates: string[]): Promise<Record<string, Entry>> {
-  if (dates.length === 0) return {};
+// 주어진 날짜들의 모든 기록(하루 여러 개 포함)을 최신순으로 반환
+export async function listEntries(dates: string[]): Promise<Entry[]> {
+  if (dates.length === 0) return [];
   const uid = await getUserId();
-  if (!uid) return {}; // 로그인 전이면 빈 결과 (에러 대신)
+  if (!uid) return [];
   const { data, error } = await supabase
     .from('entries')
-    .select('date, text, color, width, height, doodle_path, updated_at')
+    .select('id, date, text, color, width, height, doodle_path, updated_at')
     .eq('user_id', uid)
-    .in('date', dates);
-  if (error || !data) return {};
+    .in('date', dates)
+    .order('date', { ascending: false })
+    .order('updated_at', { ascending: false });
+  if (error || !data) return [];
 
   const rows = data as Row[];
   const signed = await signMany(rows.map((r) => r.doodle_path));
-  const map: Record<string, Entry> = {};
-  for (const row of rows) {
-    map[row.date] = rowToEntry(row, signed[row.doodle_path] ?? '');
+  return rows.map((r) => rowToEntry(r, signed[r.doodle_path] ?? ''));
+}
+
+// 날짜 키 -> 해당 날짜 기록 배열(최신순)
+export async function listEntriesByDate(
+  dates: string[]
+): Promise<Record<string, Entry[]>> {
+  const entries = await listEntries(dates);
+  const map: Record<string, Entry[]> = {};
+  for (const e of entries) {
+    (map[e.date] ??= []).push(e);
   }
   return map;
 }
 
-export async function getEntry(date: string): Promise<Entry | null> {
-  const map = await getEntryMap([date]);
-  return map[date] ?? null;
+// 기록 삭제 (이미지 + 행)
+export async function deleteEntry(entry: Entry): Promise<void> {
+  const uid = await getUserId();
+  if (!uid) return;
+  await supabase.from('entries').delete().eq('id', entry.id).eq('user_id', uid);
 }

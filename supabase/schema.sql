@@ -11,9 +11,11 @@ create table if not exists public.entries (
   width integer default 0,
   height integer default 0,
   doodle_path text not null,
-  updated_at timestamptz not null default now(),
-  unique (user_id, date)
+  updated_at timestamptz not null default now()
+  -- 하루 여러 개 허용 (앱에서 최대 3개로 제한)
 );
+
+create index if not exists entries_user_date_idx on public.entries (user_id, date);
 
 alter table public.entries enable row level security;
 

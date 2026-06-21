@@ -11,7 +11,7 @@ import {
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../lib/auth';
-import { getEntryMap, type Entry } from '../lib/storage';
+import { listEntries, MAX_PER_DAY, type Entry } from '../lib/storage';
 import { todayKey, dayLabel, weekDays, weekRangeLabel } from '../lib/dates';
 import { COLORS } from '../lib/theme';
 
@@ -22,10 +22,10 @@ const FRAME_W = CONTENT_W - 16 * 2 - 14 * 2;
 // 두들 한 개의 최대 표시 높이 (세로로 긴 그림이 폭발하지 않게)
 const MAX_DOODLE_H = 240;
 
-// 날짜 문자열로 일관된(매 렌더 동일) 변형값 생성 — 콜라주 느낌의 자연스러운 배치
-function collageVariant(date: string) {
+// 문자열 키로 일관된(매 렌더 동일) 변형값 생성 — 콜라주 느낌의 자연스러운 배치
+function collageVariant(key: string) {
   let h = 0;
-  for (let i = 0; i < date.length; i++) h = (h * 31 + date.charCodeAt(i)) >>> 0;
+  for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) >>> 0;
   const widthRatios = [0.95, 0.7, 0.82, 0.6, 0.75, 0.9];
   const aligns: ('flex-start' | 'center' | 'flex-end')[] = [
     'flex-start',
@@ -45,14 +45,14 @@ export default function HomeScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { signOut } = useAuth();
-  const [entries, setEntries] = useState<Record<string, Entry>>({});
+  const [stacked, setStacked] = useState<Entry[]>([]);
 
-  // 화면 포커스마다 이번 주 기록 갱신
+  // 화면 포커스마다 이번 주 기록 갱신 (하루 여러 개 포함, 최신순)
   useFocusEffect(
     useCallback(() => {
       let active = true;
-      getEntryMap(weekDays(new Date()))
-        .then((m) => active && setEntries(m))
+      listEntries(weekDays(new Date()))
+        .then((list) => active && setStacked(list))
         .catch(() => {});
       return () => {
         active = false;
@@ -60,12 +60,8 @@ export default function HomeScreen() {
     }, [])
   );
 
-  // 이번 주 기록: 최신 → 과거 순으로 배열 (위가 최신, 맨 아래가 가장 오래된 것)
-  // 프레임 안에서 아래쪽으로 정렬되어, 바닥부터 위로 쌓이는 느낌이 됨.
-  const stacked = weekDays(new Date())
-    .filter((k) => entries[k])
-    .sort((a, b) => (a < b ? 1 : -1))
-    .map((k) => entries[k]);
+  const todayCount = stacked.filter((e) => e.date === todayKey()).length;
+  const full = todayCount >= MAX_PER_DAY;
 
   return (
     <View style={{ flex: 1 }}>
@@ -76,8 +72,16 @@ export default function HomeScreen() {
             <Text style={styles.logout}>로그아웃</Text>
           </Pressable>
         </View>
-        <Pressable style={styles.primaryBtn} onPress={() => router.push('/draw')}>
-          <Text style={styles.primaryText}>오늘 감정 기록하기</Text>
+        <Pressable
+          style={[styles.primaryBtn, full && styles.primaryBtnDisabled]}
+          onPress={() => router.push('/draw')}
+          disabled={full}
+        >
+          <Text style={styles.primaryText}>
+            {full
+              ? `오늘 기록 완료 (${todayCount}/${MAX_PER_DAY})`
+              : `오늘 감정 기록하기 (${todayCount}/${MAX_PER_DAY})`}
+          </Text>
         </Pressable>
       </View>
 
@@ -95,7 +99,7 @@ export default function HomeScreen() {
             showsVerticalScrollIndicator={false}
           >
             {stacked.map((entry, i) => {
-              const v = collageVariant(entry.date);
+              const v = collageVariant(entry.id);
               // 저장된 비율(세로/가로). 값 없으면 정사각.
               const ratio = entry.width && entry.height ? entry.height / entry.width : 1;
               // 가로·세로 둘 다 상한 안에 맞추기 (비율 유지)
@@ -107,7 +111,7 @@ export default function HomeScreen() {
               }
               return (
                 <View
-                  key={entry.date}
+                  key={entry.id}
                   style={[
                     styles.doodleRow,
                     { alignItems: v.align, marginTop: i === 0 ? 0 : 14 },
@@ -170,6 +174,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     alignItems: 'center',
   },
+  primaryBtnDisabled: { backgroundColor: '#B9C2E8' },
   primaryText: { color: '#fff', fontSize: 16, fontWeight: '700' },
 
   weeklyFrame: {

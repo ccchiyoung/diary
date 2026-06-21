@@ -1,9 +1,9 @@
 import { useCallback, useState } from 'react';
-import { StyleSheet, View, Text, Image, Pressable } from 'react-native';
+import { StyleSheet, View, Text, Image, Pressable, ScrollView } from 'react-native';
 import { Calendar, LocaleConfig } from 'react-native-calendars';
 import { useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { getEntryMap, type Entry } from '../lib/storage';
+import { listEntriesByDate, type Entry } from '../lib/storage';
 import { monthDays, todayKey, dayLabel } from '../lib/dates';
 import { COLORS } from '../lib/theme';
 
@@ -20,11 +20,11 @@ LocaleConfig.defaultLocale = 'ko';
 export default function MonthlyScreen() {
   const insets = useSafeAreaInsets();
   const [month, setMonth] = useState(new Date());
-  const [entries, setEntries] = useState<Record<string, Entry>>({});
-  const [selected, setSelected] = useState<Entry | null>(null);
+  const [byDate, setByDate] = useState<Record<string, Entry[]>>({});
+  const [selected, setSelected] = useState<Entry[] | null>(null);
 
   const loadFor = useCallback((ref: Date) => {
-    getEntryMap(monthDays(ref)).then(setEntries).catch(() => {});
+    listEntriesByDate(monthDays(ref)).then(setByDate).catch(() => {});
   }, []);
 
   useFocusEffect(
@@ -42,7 +42,6 @@ export default function MonthlyScreen() {
           setMonth(ref);
           loadFor(ref);
         }}
-        markedDates={entries}
         hideExtraDays
         theme={{
           calendarBackground: COLORS.bg,
@@ -51,15 +50,16 @@ export default function MonthlyScreen() {
           arrowColor: COLORS.accent,
           textMonthFontWeight: '700',
         }}
-        // 각 날짜 칸에 두들 썸네일 렌더
+        // 각 날짜 칸에 대표 두들 + 개수 표시
         dayComponent={({ date, state }: any) => {
-          const entry = date ? (entries[date.dateString] as Entry | undefined) : undefined;
+          const dayEntries = date ? byDate[date.dateString] ?? [] : [];
+          const rep = dayEntries[0]; // 최신 기록 (목록은 최신순)
           const isToday = date?.dateString === todayKey();
           return (
             <Pressable
               style={styles.cell}
-              onPress={() => entry && setSelected(entry)}
-              disabled={!entry}
+              onPress={() => dayEntries.length && setSelected(dayEntries)}
+              disabled={!dayEntries.length}
             >
               <Text
                 style={[
@@ -73,29 +73,36 @@ export default function MonthlyScreen() {
               <View
                 style={[
                   styles.cellThumb,
-                  entry ? { borderColor: entry.color } : styles.cellThumbEmpty,
+                  rep ? { borderColor: rep.color } : styles.cellThumbEmpty,
                 ]}
               >
-                {entry ? (
-                  <Image
-                    source={{ uri: entry.doodleUri }}
-                    style={styles.cellImg}
-                    resizeMode="cover"
-                  />
+                {rep ? (
+                  <Image source={{ uri: rep.doodleUri }} style={styles.cellImg} resizeMode="cover" />
                 ) : null}
+                {dayEntries.length > 1 && (
+                  <View style={styles.countBadge}>
+                    <Text style={styles.countText}>{dayEntries.length}</Text>
+                  </View>
+                )}
               </View>
             </Pressable>
           );
         }}
       />
 
-      {selected ? (
+      {selected && selected.length > 0 ? (
         <View style={styles.detail}>
-          <Image source={{ uri: selected.doodleUri }} style={styles.detailImg} resizeMode="contain" />
-          <View style={styles.detailBody}>
-            <Text style={styles.detailDate}>{dayLabel(selected.date)}</Text>
-            <Text style={styles.detailText}>{selected.text || '두들만 남긴 날'}</Text>
-          </View>
+          <Text style={styles.detailDate}>
+            {dayLabel(selected[0].date)} · {selected.length}개
+          </Text>
+          <ScrollView style={{ maxHeight: 220 }} showsVerticalScrollIndicator={false}>
+            {selected.map((e) => (
+              <View key={e.id} style={styles.detailRow}>
+                <Image source={{ uri: e.doodleUri }} style={styles.detailThumb} resizeMode="contain" />
+                <Text style={styles.detailText}>{e.text || '두들만 남긴 날'}</Text>
+              </View>
+            ))}
+          </ScrollView>
         </View>
       ) : (
         <Text style={styles.hint}>날짜를 누르면 그날의 기록을 볼 수 있어요.</Text>
@@ -120,9 +127,20 @@ const styles = StyleSheet.create({
   },
   cellThumbEmpty: { borderColor: COLORS.border, borderStyle: 'dashed' },
   cellImg: { width: '100%', height: '100%' },
+  countBadge: {
+    position: 'absolute',
+    right: -4,
+    top: -4,
+    minWidth: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: COLORS.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 3,
+  },
+  countText: { color: '#fff', fontSize: 10, fontWeight: '700' },
   detail: {
-    flexDirection: 'row',
-    gap: 14,
     marginTop: 12,
     marginHorizontal: 8,
     padding: 14,
@@ -130,17 +148,16 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     borderWidth: 1,
     borderColor: COLORS.border,
-    alignItems: 'center',
   },
-  detailImg: {
-    width: 90,
-    height: 90,
-    borderRadius: 12,
+  detailDate: { fontSize: 14, fontWeight: '700', color: COLORS.text, marginBottom: 10 },
+  detailRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 10 },
+  detailThumb: {
+    width: 64,
+    height: 64,
+    borderRadius: 10,
     backgroundColor: COLORS.canvas,
   },
-  detailBody: { flex: 1 },
-  detailDate: { fontSize: 14, fontWeight: '700', color: COLORS.text, marginBottom: 6 },
-  detailText: { fontSize: 14, color: COLORS.text, lineHeight: 20 },
+  detailText: { flex: 1, fontSize: 14, color: COLORS.text, lineHeight: 20 },
   hint: {
     textAlign: 'center',
     color: COLORS.subtext,
