@@ -5,7 +5,6 @@ import {
   Text,
   Pressable,
   Image,
-  ScrollView,
   Dimensions,
   Animated,
 } from 'react-native';
@@ -23,25 +22,26 @@ const FRAME_W = CONTENT_W - 16 * 2 - 14 * 2;
 // 두들 한 개의 최대 표시 높이 (세로로 긴 그림이 폭발하지 않게)
 const MAX_DOODLE_H = 240;
 
-// 문자열 키로 일관된(매 렌더 동일) 변형값 생성 — 위에서 떨어진 더미처럼 랜덤하게
+// 문자열 키로 일관된(매 렌더 동일) 변형값 생성 — 바닥에 2D로 흩어진 더미
 function collageVariant(key: string) {
   let h = 0;
   for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) >>> 0;
-  const widthRatios = [0.56, 0.48, 0.62, 0.5, 0.58, 0.52];
-  // 가로 위치(-1=왼쪽 ~ 1=오른쪽) — 좌우로 넓게 흩어지게
-  const xBias = [-0.9, 0.78, -0.45, 0.9, -0.7, 0.35, -0.2, 0.6];
-  const rotations = ['-11deg', '8deg', '-6deg', '12deg', '-9deg', '4deg', '-13deg', '9deg'];
-  const overlaps = [-58, -44, -66, -38, -52, -48]; // 세로 겹침(랜덤)
+  const widthRatios = [0.5, 0.42, 0.56, 0.46, 0.52, 0.48];
+  // 가로 위치 0(왼쪽)~1(오른쪽) — 좌우로 넓게 흩어지게
+  const xFracs = [0.04, 0.62, 0.28, 0.9, 0.16, 0.74, 0.46, 0.98, 0.36, 0.82];
+  // 바닥에서 띄울 높이(px) — 어떤 건 바닥, 어떤 건 위에 얹힌 느낌
+  const yPx = [0, 40, 96, 18, 64, 130, 8, 110, 52, 28];
+  const rotations = ['-11deg', '8deg', '-6deg', '13deg', '-9deg', '4deg', '-14deg', '10deg'];
   return {
     widthRatio: widthRatios[h % widthRatios.length],
-    xBias: xBias[(h >> 3) % xBias.length],
+    xFrac: xFracs[(h >> 3) % xFracs.length],
+    yPx: yPx[(h >> 7) % yPx.length],
     rotate: rotations[(h >> 5) % rotations.length],
-    overlap: overlaps[(h >> 8) % overlaps.length],
-    dropDelay: (h >> 11) % 5, // 0~4 (낙하 타이밍 살짝 랜덤)
+    dropDelay: (h >> 11) % 5,
   };
 }
 
-// 위에서 떨어져 바닥에 쌓이는 한 개의 두들
+// 위에서 떨어져 바닥에 흩어지는 한 개의 두들 (절대 위치)
 function FallingDoodle({
   entry,
   index,
@@ -61,7 +61,7 @@ function FallingDoodle({
 
   useEffect(() => {
     // 오래된 것부터 떨어지고, 최신(index 0)이 마지막에 떨어져 맨 위에 얹힘
-    const delay = (total - 1 - index) * 90 + v.dropDelay * 60;
+    const delay = (total - 1 - index) * 110 + v.dropDelay * 70;
     Animated.parallel([
       Animated.spring(drop, {
         toValue: 0,
@@ -79,22 +79,20 @@ function FallingDoodle({
     ]).start();
   }, [drop, opacity, index, total, v.dropDelay]);
 
-  // 바닥 더미에서 좌우로 흩어질 여유 폭
-  const freeX = Math.max(0, FRAME_W - width);
-  const offsetX = (v.xBias * freeX) / 2;
-  const translateY = drop.interpolate({ inputRange: [0, 1], outputRange: [0, -320] });
+  const left = v.xFrac * Math.max(0, FRAME_W - width);
+  const translateY = drop.interpolate({ inputRange: [0, 1], outputRange: [0, -360] });
 
   return (
     <Animated.View
-      style={[
-        styles.pileItem,
-        {
-          marginTop: index === 0 ? 0 : v.overlap, // 랜덤하게 겹쳐 쌓임
-          zIndex: total - index, // 최신이 위로 겹치게
-          opacity,
-          transform: [{ translateX: offsetX }, { translateY }, { rotate: v.rotate }],
-        },
-      ]}
+      style={{
+        position: 'absolute',
+        left,
+        bottom: v.yPx,
+        zIndex: total - index, // 최신이 위로 겹치게
+        opacity,
+        alignItems: 'center',
+        transform: [{ translateY }, { rotate: v.rotate }],
+      }}
     >
       {!!entry.text && (
         <View style={styles.bubbleWrap}>
@@ -161,11 +159,7 @@ export default function HomeScreen() {
         </View>
 
         {stacked.length > 0 ? (
-          <ScrollView
-            style={styles.weeklyScroll}
-            contentContainerStyle={styles.weeklyScrollContent}
-            showsVerticalScrollIndicator={false}
-          >
+          <View style={styles.pileArea}>
             {stacked.map((entry, i) => {
               const v = collageVariant(entry.id);
               const ratio = entry.width && entry.height ? entry.height / entry.width : 1;
@@ -186,7 +180,7 @@ export default function HomeScreen() {
                 />
               );
             })}
-          </ScrollView>
+          </View>
         ) : (
           <View style={styles.empty}>
             <Text style={styles.emptyEmoji}>🎨</Text>
@@ -245,10 +239,8 @@ const styles = StyleSheet.create({
   },
   weeklyTitle: { fontSize: 15, fontWeight: '800', color: COLORS.text },
   weeklyRange: { fontSize: 12, color: COLORS.subtext, fontWeight: '600' },
-  weeklyScroll: { flex: 1 },
-  // 바닥 정렬 → 두들이 프레임 아래쪽부터 위로 쌓임
-  weeklyScrollContent: { flexGrow: 1, justifyContent: 'flex-end', paddingTop: 8, paddingBottom: 4 },
-  pileItem: { width: '100%', alignItems: 'center' },
+  // 두들이 절대 위치로 흩어지는 바닥 영역
+  pileArea: { flex: 1, position: 'relative' },
 
   // 말풍선 (두들 위, 꼬리는 아래로)
   bubbleWrap: { maxWidth: '88%', marginBottom: 2, zIndex: 2 },
