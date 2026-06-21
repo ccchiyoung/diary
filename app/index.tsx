@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   StyleSheet,
   View,
@@ -7,6 +7,7 @@ import {
   Image,
   ScrollView,
   Dimensions,
+  Animated,
 } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -22,23 +23,82 @@ const FRAME_W = CONTENT_W - 16 * 2 - 14 * 2;
 // 두들 한 개의 최대 표시 높이 (세로로 긴 그림이 폭발하지 않게)
 const MAX_DOODLE_H = 240;
 
-// 문자열 키로 일관된(매 렌더 동일) 변형값 생성 — 콜라주 느낌의 자연스러운 배치
+// 문자열 키로 일관된(매 렌더 동일) 변형값 생성
 function collageVariant(key: string) {
   let h = 0;
   for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) >>> 0;
-  const widthRatios = [0.95, 0.7, 0.82, 0.6, 0.75, 0.9];
-  const aligns: ('flex-start' | 'center' | 'flex-end')[] = [
-    'flex-start',
-    'center',
-    'flex-end',
-    'center',
-  ];
-  const rotations = ['-4deg', '3deg', '-2deg', '5deg', '0deg', '-6deg', '2deg'];
+  const widthRatios = [0.78, 0.66, 0.72, 0.6, 0.7];
+  // 가로 위치(-1=왼쪽 ~ 1=오른쪽) — 바닥 더미가 좌우로 자연스럽게 퍼지도록
+  const xBias = [0, -0.55, 0.5, -0.3, 0.35, -0.6, 0.6];
+  const rotations = ['-5deg', '4deg', '-3deg', '6deg', '0deg', '-7deg', '3deg'];
   return {
     widthRatio: widthRatios[h % widthRatios.length],
-    align: aligns[(h >> 3) % aligns.length],
+    xBias: xBias[(h >> 3) % xBias.length],
     rotate: rotations[(h >> 5) % rotations.length],
   };
+}
+
+// 위에서 떨어져 바닥에 쌓이는 한 개의 두들
+function FallingDoodle({
+  entry,
+  index,
+  width,
+  height,
+}: {
+  entry: Entry;
+  index: number;
+  width: number;
+  height: number;
+}) {
+  const v = collageVariant(entry.id);
+  const drop = useRef(new Animated.Value(1)).current; // 1=위, 0=착지
+  const opacity = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.spring(drop, {
+        toValue: 0,
+        delay: index * 110,
+        friction: 6,
+        tension: 70,
+        useNativeDriver: true,
+      }),
+      Animated.timing(opacity, {
+        toValue: 1,
+        duration: 180,
+        delay: index * 110,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, [drop, opacity, index]);
+
+  // 바닥 더미에서 좌우로 흩어질 여유 폭
+  const freeX = Math.max(0, FRAME_W - width);
+  const offsetX = (v.xBias * freeX) / 2;
+  const translateY = drop.interpolate({ inputRange: [0, 1], outputRange: [0, -260] });
+
+  return (
+    <Animated.View
+      style={[
+        styles.pileItem,
+        {
+          marginTop: index === 0 ? 0 : -28, // 살짝 겹쳐 쌓임
+          opacity,
+          transform: [{ translateX: offsetX }, { translateY }, { rotate: v.rotate }],
+        },
+      ]}
+    >
+      {!!entry.text && (
+        <View style={styles.bubbleWrap}>
+          <View style={styles.bubble}>
+            <Text style={styles.bubbleText}>{entry.text}</Text>
+          </View>
+          <View style={styles.bubbleTail} />
+        </View>
+      )}
+      <Image source={{ uri: entry.doodleUri }} style={{ width, height }} resizeMode="contain" />
+    </Animated.View>
+  );
 }
 
 export default function HomeScreen() {
@@ -100,9 +160,7 @@ export default function HomeScreen() {
           >
             {stacked.map((entry, i) => {
               const v = collageVariant(entry.id);
-              // 저장된 비율(세로/가로). 값 없으면 정사각.
               const ratio = entry.width && entry.height ? entry.height / entry.width : 1;
-              // 가로·세로 둘 다 상한 안에 맞추기 (비율 유지)
               let w = FRAME_W * v.widthRatio;
               let h = w * ratio;
               if (h > MAX_DOODLE_H) {
@@ -110,31 +168,7 @@ export default function HomeScreen() {
                 w = h / ratio;
               }
               return (
-                <View
-                  key={entry.id}
-                  style={[
-                    styles.doodleRow,
-                    { alignItems: v.align, marginTop: i === 0 ? 0 : 14 },
-                  ]}
-                >
-                  {!!entry.text && (
-                    <View style={styles.bubbleWrap}>
-                      <View style={styles.bubble}>
-                        <Text style={styles.bubbleText}>{entry.text}</Text>
-                      </View>
-                      <View style={styles.bubbleTail} />
-                    </View>
-                  )}
-                  <Image
-                    source={{ uri: entry.doodleUri }}
-                    style={{
-                      width: w,
-                      height: h,
-                      transform: [{ rotate: v.rotate }],
-                    }}
-                    resizeMode="contain"
-                  />
-                </View>
+                <FallingDoodle key={entry.id} entry={entry} index={i} width={w} height={h} />
               );
             })}
           </ScrollView>
@@ -198,8 +232,8 @@ const styles = StyleSheet.create({
   weeklyRange: { fontSize: 12, color: COLORS.subtext, fontWeight: '600' },
   weeklyScroll: { flex: 1 },
   // 바닥 정렬 → 두들이 프레임 아래쪽부터 위로 쌓임
-  weeklyScrollContent: { flexGrow: 1, justifyContent: 'flex-end', paddingTop: 8 },
-  doodleRow: { width: '100%' },
+  weeklyScrollContent: { flexGrow: 1, justifyContent: 'flex-end', paddingTop: 8, paddingBottom: 4 },
+  pileItem: { width: '100%', alignItems: 'center' },
 
   // 말풍선 (두들 위, 꼬리는 아래로)
   bubbleWrap: { maxWidth: '88%', marginBottom: 2, zIndex: 2 },
