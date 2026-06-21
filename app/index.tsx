@@ -23,18 +23,21 @@ const FRAME_W = CONTENT_W - 16 * 2 - 14 * 2;
 // 두들 한 개의 최대 표시 높이 (세로로 긴 그림이 폭발하지 않게)
 const MAX_DOODLE_H = 240;
 
-// 문자열 키로 일관된(매 렌더 동일) 변형값 생성
+// 문자열 키로 일관된(매 렌더 동일) 변형값 생성 — 위에서 떨어진 더미처럼 랜덤하게
 function collageVariant(key: string) {
   let h = 0;
   for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) >>> 0;
-  const widthRatios = [0.78, 0.66, 0.72, 0.6, 0.7];
-  // 가로 위치(-1=왼쪽 ~ 1=오른쪽) — 바닥 더미가 좌우로 자연스럽게 퍼지도록
-  const xBias = [0, -0.55, 0.5, -0.3, 0.35, -0.6, 0.6];
-  const rotations = ['-5deg', '4deg', '-3deg', '6deg', '0deg', '-7deg', '3deg'];
+  const widthRatios = [0.56, 0.48, 0.62, 0.5, 0.58, 0.52];
+  // 가로 위치(-1=왼쪽 ~ 1=오른쪽) — 좌우로 넓게 흩어지게
+  const xBias = [-0.9, 0.78, -0.45, 0.9, -0.7, 0.35, -0.2, 0.6];
+  const rotations = ['-11deg', '8deg', '-6deg', '12deg', '-9deg', '4deg', '-13deg', '9deg'];
+  const overlaps = [-58, -44, -66, -38, -52, -48]; // 세로 겹침(랜덤)
   return {
     widthRatio: widthRatios[h % widthRatios.length],
     xBias: xBias[(h >> 3) % xBias.length],
     rotate: rotations[(h >> 5) % rotations.length],
+    overlap: overlaps[(h >> 8) % overlaps.length],
+    dropDelay: (h >> 11) % 5, // 0~4 (낙하 타이밍 살짝 랜덤)
   };
 }
 
@@ -42,11 +45,13 @@ function collageVariant(key: string) {
 function FallingDoodle({
   entry,
   index,
+  total,
   width,
   height,
 }: {
   entry: Entry;
   index: number;
+  total: number;
   width: number;
   height: number;
 }) {
@@ -55,34 +60,37 @@ function FallingDoodle({
   const opacity = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
+    // 오래된 것부터 떨어지고, 최신(index 0)이 마지막에 떨어져 맨 위에 얹힘
+    const delay = (total - 1 - index) * 90 + v.dropDelay * 60;
     Animated.parallel([
       Animated.spring(drop, {
         toValue: 0,
-        delay: index * 110,
+        delay,
         friction: 6,
         tension: 70,
         useNativeDriver: true,
       }),
       Animated.timing(opacity, {
         toValue: 1,
-        duration: 180,
-        delay: index * 110,
+        duration: 160,
+        delay,
         useNativeDriver: true,
       }),
     ]).start();
-  }, [drop, opacity, index]);
+  }, [drop, opacity, index, total, v.dropDelay]);
 
   // 바닥 더미에서 좌우로 흩어질 여유 폭
   const freeX = Math.max(0, FRAME_W - width);
   const offsetX = (v.xBias * freeX) / 2;
-  const translateY = drop.interpolate({ inputRange: [0, 1], outputRange: [0, -260] });
+  const translateY = drop.interpolate({ inputRange: [0, 1], outputRange: [0, -320] });
 
   return (
     <Animated.View
       style={[
         styles.pileItem,
         {
-          marginTop: index === 0 ? 0 : -28, // 살짝 겹쳐 쌓임
+          marginTop: index === 0 ? 0 : v.overlap, // 랜덤하게 겹쳐 쌓임
+          zIndex: total - index, // 최신이 위로 겹치게
           opacity,
           transform: [{ translateX: offsetX }, { translateY }, { rotate: v.rotate }],
         },
@@ -168,7 +176,14 @@ export default function HomeScreen() {
                 w = h / ratio;
               }
               return (
-                <FallingDoodle key={entry.id} entry={entry} index={i} width={w} height={h} />
+                <FallingDoodle
+                  key={entry.id}
+                  entry={entry}
+                  index={i}
+                  total={stacked.length}
+                  width={w}
+                  height={h}
+                />
               );
             })}
           </ScrollView>
