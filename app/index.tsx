@@ -15,9 +15,12 @@ import { getEntryMap, type Entry } from '../lib/storage';
 import { todayKey, dayLabel, weekDays, weekRangeLabel } from '../lib/dates';
 import { COLORS } from '../lib/theme';
 
-const SCREEN_W = Dimensions.get('window').width;
+// 데스크톱(웹)에서 과도하게 넓어지지 않게 콘텐츠 폭 상한
+const CONTENT_W = Math.min(Dimensions.get('window').width, 480);
 // 위클리 프레임 안에서 쓸 수 있는 가로폭 (바깥 16 + 프레임 14 패딩 양쪽)
-const FRAME_W = SCREEN_W - 16 * 2 - 14 * 2;
+const FRAME_W = CONTENT_W - 16 * 2 - 14 * 2;
+// 두들 한 개의 최대 표시 높이 (세로로 긴 그림이 폭발하지 않게)
+const MAX_DOODLE_H = 240;
 
 // 날짜 문자열로 일관된(매 렌더 동일) 변형값 생성 — 콜라주 느낌의 자연스러운 배치
 function collageVariant(date: string) {
@@ -93,9 +96,15 @@ export default function HomeScreen() {
           >
             {stacked.map((entry, i) => {
               const v = collageVariant(entry.date);
-              const w = FRAME_W * v.widthRatio;
-              // 저장된 비율로 높이 계산 (이전 데이터 호환: 값 없으면 정사각)
+              // 저장된 비율(세로/가로). 값 없으면 정사각.
               const ratio = entry.width && entry.height ? entry.height / entry.width : 1;
+              // 가로·세로 둘 다 상한 안에 맞추기 (비율 유지)
+              let w = FRAME_W * v.widthRatio;
+              let h = w * ratio;
+              if (h > MAX_DOODLE_H) {
+                h = MAX_DOODLE_H;
+                w = h / ratio;
+              }
               return (
                 <View
                   key={entry.date}
@@ -116,7 +125,7 @@ export default function HomeScreen() {
                     source={{ uri: entry.doodleUri }}
                     style={{
                       width: w,
-                      height: w * ratio,
+                      height: h,
                       transform: [{ rotate: v.rotate }],
                     }}
                     resizeMode="contain"
