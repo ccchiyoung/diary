@@ -1,16 +1,16 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   StyleSheet,
   View,
   Text,
   Pressable,
   Image,
-  Dimensions,
   type LayoutChangeEvent,
 } from 'react-native';
 import Reanimated, {
   useSharedValue,
   useAnimatedStyle,
+  withSpring,
   runOnJS,
 } from 'react-native-reanimated';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
@@ -21,12 +21,9 @@ import { listEntries, updateEntryPosition, MAX_PER_DAY, type Entry } from '../li
 import { todayKey, dayLabel, weekDays, weekRangeLabel } from '../lib/dates';
 import { COLORS } from '../lib/theme';
 
-// 데스크톱(웹)에서 과도하게 넓어지지 않게 콘텐츠 폭 상한
-const CONTENT_W = Math.min(Dimensions.get('window').width, 480);
-// 위클리 프레임 안에서 쓸 수 있는 가로폭 (바깥 16 + 프레임 14 패딩 양쪽)
-const FRAME_W = CONTENT_W - 16 * 2 - 14 * 2;
-// 두들 한 개의 최대 표시 높이 (스티커 느낌으로 작게)
-const MAX_DOODLE_H = 150;
+// 두들 한 개의 최대 표시 크기 (스티커 느낌으로 작게)
+const MAX_DOODLE_H = 140;
+const MAX_DOODLE_W = 130;
 
 // 문자열 키로 일관된(매 렌더 동일) 변형값 생성
 function collageVariant(key: string) {
@@ -46,49 +43,141 @@ function collageVariant(key: string) {
 // 순서별 가로 레인 — 가운데/왼쪽/오른쪽 골고루 분배 (한쪽 몰림 방지)
 const X_LANES = [0.5, 0.12, 0.86, 0.32, 0.68, 0.04, 0.95, 0.45, 0.22, 0.75];
 
-// 끌어서 옮길 수 있는 한 개의 두들 (위치는 영역 대비 0~1 비율로 저장)
+const GAP = 8; // 스티커 사이 최소 간격
+
+type Rect = { x: number; y: number; w: number; h: number };
+
+function overlaps(x: number, y: number, w: number, h: number, o: Rect): boolean {
+  return (
+    x < o.x + o.w + GAP &&
+    x + w + GAP > o.x &&
+    y < o.y + o.h + GAP &&
+    y + h + GAP > o.y
+  );
+}
+
+// 원하는 위치에 두되, 다른 스티커와 겹치면 가장 가까운 빈 자리로
+function findFreeSpot(
+  desiredX: number,
+  desiredY: number,
+  w: number,
+  h: number,
+  others: Rect[],
+  areaW: number,
+  areaH: number
+): { x: number; y: number } {
+  const maxX = Math.max(0, areaW - w);
+  const maxY = Math.max(0, areaH - h);
+  const cx = Math.min(maxX, Math.max(0, desiredX));
+  const cy = Math.min(maxY, Math.max(0, desiredY));
+  if (!others.some((o) => overlaps(cx, cy, w, h, o))) return { x: cx, y: cy };
+
+  let best: { x: number; y: number } | null = null;
+  let bestD = Infinity;
+  const step = 10;
+  for (let y = 0; y <= maxY; y += step) {
+    for (let x = 0; x <= maxX; x += step) {
+      if (others.some((o) => overlaps(x, y, w, h, o))) continue;
+      const d = (x - cx) ** 2 + (y - cy) ** 2;
+      if (d < bestD) {
+        bestD = d;
+        best = { x, y };
+      }
+    }
+  }
+  return best ?? { x: cx, y: cy };
+}
+
+// 두들 크기 계산 (화면 크기와 무관하게 작게: 가로/세로 상한)
+function doodleSize(entry: Entry, areaW: number) {
+  const v = collageVariant(entry.id);
+  const ratio = entry.width && entry.height ? entry.height / entry.width : 1;
+  let w = Math.min(areaW * v.widthRatio, MAX_DOODLE_W);
+  let h = w * ratio;
+  if (h > MAX_DOODLE_H) {
+    h = MAX_DOODLE_H;
+    w = h / ratio;
+  }
+  return { w, h };
+}
+
+// 모든 스티커를 겹치지 않게 배치 (저장 위치/기본 위치 → 충돌 해소)
+function packLayout(
+  entries: Entry[],
+  area: { w: number; h: number },
+  override: Record<string, { fx: number; fy: number }>,
+  lastMovedId: string | null
+): Record<string, Rect> {
+  const res: Record<string, Rect> = {};
+  if (!area.w || !area.h) return res;
+
+  // 방금 옮긴 스티커는 마지막에 배치 → 다른 스티커를 밀어내지 않음
+  const order = entries
+    .map((e, i) => ({ e, i }))
+    .sort((a, b) => (a.e.id === lastMovedId ? 1 : 0) - (b.e.id === lastMovedId ? 1 : 0));
+
+  const placed: Rect[] = [];
+  for (const { e, i } of order) {
+    const { w, h } = doodleSize(e, area.w);
+    const availW = Math.max(1, area.w - w);
+    const availH = Math.max(1, area.h - h);
+    const ov = override[e.id];
+    const fx = ov ? ov.fx : e.posX;
+    const fy = ov ? ov.fy : e.posY;
+    let dx: number;
+    let dy: number;
+    if (fx != null && fy != null) {
+      dx = fx * availW;
+      dy = fy * availH;
+    } else {
+      const v = collageVariant(e.id);
+      const lane = Math.min(1, Math.max(0, X_LANES[i % X_LANES.length] + v.jitter));
+      dx = lane * availW;
+      dy = Math.min(availH, i * (h * 0.7));
+    }
+    const spot = findFreeSpot(dx, dy, w, h, placed, area.w, area.h);
+    const rect = { x: spot.x, y: spot.y, w, h };
+    placed.push(rect);
+    res[e.id] = rect;
+  }
+  return res;
+}
+
+// 끌어서 옮길 수 있는 한 개의 두들 (위치/충돌은 부모가 관리)
 function DraggableDoodle({
   entry,
-  index,
+  rect,
   areaW,
   areaH,
-  width,
-  height,
+  onDrop,
 }: {
   entry: Entry;
-  index: number;
+  rect: Rect;
   areaW: number;
   areaH: number;
-  width: number;
-  height: number;
+  onDrop: (id: string, px: number, py: number) => void;
 }) {
   const v = collageVariant(entry.id);
-  const availW = Math.max(1, areaW - width);
-  const availH = Math.max(1, areaH - height);
+  const { x, y, w: width, h: height } = rect;
+  const maxX = Math.max(0, areaW - width);
+  const maxY = Math.max(0, areaH - height);
 
-  // 저장값 없으면 기본 위치: 가로 레인 + 세로 스태거
-  const laneFrac = Math.min(1, Math.max(0, X_LANES[index % X_LANES.length] + v.jitter));
-  const defX = laneFrac * availW;
-  const defY = Math.min(availH, index * (height * 0.7));
-  const initX = entry.posX != null ? Math.min(availW, Math.max(0, entry.posX * availW)) : defX;
-  const initY = entry.posY != null ? Math.min(availH, Math.max(0, entry.posY * availH)) : defY;
-
-  const tx = useSharedValue(initX);
-  const ty = useSharedValue(initY);
+  const tx = useSharedValue(x);
+  const ty = useSharedValue(y);
   const startX = useSharedValue(0);
   const startY = useSharedValue(0);
 
-  // 데이터/영역 변경 시 위치 동기화
+  // 부모가 위치를 재배치(드롭/리사이즈)하면 그 자리로 부드럽게 이동
   useEffect(() => {
-    tx.value = initX;
-    ty.value = initY;
-  }, [initX, initY, tx, ty]);
+    tx.value = withSpring(x, { damping: 16, stiffness: 140 });
+    ty.value = withSpring(y, { damping: 16, stiffness: 140 });
+  }, [x, y, tx, ty]);
 
-  const persist = useCallback(
-    (fx: number, fy: number) => {
-      updateEntryPosition(entry.id, fx, fy).catch(() => {});
+  const report = useCallback(
+    (px: number, py: number) => {
+      onDrop(entry.id, px, py);
     },
-    [entry.id]
+    [entry.id, onDrop]
   );
 
   const pan = Gesture.Pan()
@@ -97,11 +186,11 @@ function DraggableDoodle({
       startY.value = ty.value;
     })
     .onUpdate((e) => {
-      tx.value = Math.min(availW, Math.max(0, startX.value + e.translationX));
-      ty.value = Math.min(availH, Math.max(0, startY.value + e.translationY));
+      tx.value = Math.min(maxX, Math.max(0, startX.value + e.translationX));
+      ty.value = Math.min(maxY, Math.max(0, startY.value + e.translationY));
     })
     .onEnd(() => {
-      runOnJS(persist)(tx.value / availW, ty.value / availH);
+      runOnJS(report)(tx.value, ty.value);
     });
 
   const aStyle = useAnimatedStyle(() => ({
@@ -110,7 +199,9 @@ function DraggableDoodle({
 
   return (
     <GestureDetector gesture={pan}>
-      <Reanimated.View style={[{ position: 'absolute', left: 0, top: 0, width, alignItems: 'center' }, aStyle]}>
+      <Reanimated.View
+        style={[{ position: 'absolute', left: 0, top: 0, width, alignItems: 'center' }, aStyle]}
+      >
         {!!entry.text && (
           <View style={styles.bubbleWrap}>
             <View style={styles.bubble}>
@@ -133,6 +224,9 @@ export default function HomeScreen() {
   const { signOut } = useAuth();
   const [stacked, setStacked] = useState<Entry[]>([]);
   const [area, setArea] = useState({ w: 0, h: 0 });
+  // 드래그로 바뀐 위치(영역 대비 0~1) + 마지막으로 옮긴 스티커
+  const [override, setOverride] = useState<Record<string, { fx: number; fy: number }>>({});
+  const [lastMovedId, setLastMovedId] = useState<string | null>(null);
 
   const onAreaLayout = (e: LayoutChangeEvent) => {
     const { width, height } = e.nativeEvent.layout;
@@ -144,12 +238,43 @@ export default function HomeScreen() {
     useCallback(() => {
       let active = true;
       listEntries(weekDays(new Date()))
-        .then((list) => active && setStacked(list))
+        .then((list) => {
+          if (active) {
+            setStacked(list);
+            setOverride({}); // 새로 불러오면 저장된 위치 기준으로 재배치
+          }
+        })
         .catch(() => {});
       return () => {
         active = false;
       };
     }, [])
+  );
+
+  // 겹치지 않게 배치된 좌표 (저장 위치/기본 위치 → 충돌 해소)
+  const layout = useMemo(
+    () => packLayout(stacked, area, override, lastMovedId),
+    [stacked, area, override, lastMovedId]
+  );
+
+  // 드롭: 놓은 위치를 다른 스티커와 안 겹치는 가장 가까운 자리로 보정 후 저장
+  const handleDrop = useCallback(
+    (id: string, px: number, py: number) => {
+      const self = layout[id];
+      if (!self) return;
+      const others = Object.entries(layout)
+        .filter(([oid]) => oid !== id)
+        .map(([, r]) => r);
+      const spot = findFreeSpot(px, py, self.w, self.h, others, area.w, area.h);
+      const availW = Math.max(1, area.w - self.w);
+      const availH = Math.max(1, area.h - self.h);
+      const fx = spot.x / availW;
+      const fy = spot.y / availH;
+      setOverride((o) => ({ ...o, [id]: { fx, fy } }));
+      setLastMovedId(id);
+      updateEntryPosition(id, fx, fy).catch(() => {});
+    },
+    [layout, area.w, area.h]
   );
 
   const todayCount = stacked.filter((e) => e.date === todayKey()).length;
@@ -193,24 +318,17 @@ export default function HomeScreen() {
             </View>
           ) : (
             area.w > 0 &&
-            stacked.map((entry, i) => {
-              const v = collageVariant(entry.id);
-              const ratio = entry.width && entry.height ? entry.height / entry.width : 1;
-              let w = area.w * v.widthRatio;
-              let h = w * ratio;
-              if (h > MAX_DOODLE_H) {
-                h = MAX_DOODLE_H;
-                w = h / ratio;
-              }
+            stacked.map((entry) => {
+              const rect = layout[entry.id];
+              if (!rect) return null;
               return (
                 <DraggableDoodle
                   key={entry.id}
                   entry={entry}
-                  index={i}
+                  rect={rect}
                   areaW={area.w}
                   areaH={area.h}
-                  width={w}
-                  height={h}
+                  onDrop={handleDrop}
                 />
               );
             })
